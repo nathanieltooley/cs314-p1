@@ -33,18 +33,19 @@
 #define ONE_SECOND     1000000    //    1 second
 #define THREE_SECONDS  3000000    //    3 seconds
 
-#define PERM_FLAG         0644
+#define PERM_FLAG         0644    // May also need to be 0666
 
 // definition of message -------------------------------------------
 struct message{
-         long mtype;
-         int mtext[BUFFER_SIZE];
+   long mtype;
+   int mtext[BUFFER_SIZE];
 };
 
 struct shared_mem {
    uint go_flag;
    uint done_flag[NUM_CHILD];
    int individual_sum[NUM_CHILD];
+   int type_flag;
 };
 
 /* function "millisleep" ------------------------------------------ */
@@ -63,46 +64,133 @@ unsigned int uniform_rand(void)
 }
 
 /* Process C1 ============================================================= */
-void process_C1(struct shared_mem * p_shm, int msqid)
+void consumer_process(struct shared_mem * p_shm, int msqid, int process_number)
 {
    int          i;            // the loop counter
    int          status;       // result status code           
    unsigned int my_rand;      // a randon number
    unsigned int checksum;     // the local checksum
 
+   struct message buf;
+   char* consumer_string = "first";
+   int messages_received = 0;
+
+   if (process_number == 3) {
+      consumer_string = "second";
+   }
+
    // REQUIRED output #1 -------------------------------------------
    // NOTE: C1 can not make any output before this output
-   printf("    Child Process #1 is created ....\n");
-   printf("    I am the first consumer ....\n\n");
+   printf("    Child Process #%d is created ....\n", process_number);
+   printf("    I am the %s consumer ....\n\n", consumer_string);
 
    // REQUIRED: shuffle the seed for random generator --------------
    srand(time(0)); 
 
- 
+   while (p_shm->go_flag == 0){
+      millisleep(1000);
+   }
 
+   while (messages_received < NUM_REPEATS)
+   {
+      // printf("Recieving");
+      // don't wait for a message to appear
+      status = msgrcv(msqid, (struct message*)&buf, sizeof(buf.mtext), 0, 0); 
 
+      if (status == -1) {
+         perror("Error occured when recieving message in consumer process");
+         continue;
+      }
 
+      my_rand = buf.mtext[0];
 
+      p_shm->individual_sum[process_number] += my_rand;
 
+      messages_received++;
+   }
 
-
+   checksum = p_shm->individual_sum[process_number];
 
    // REQUIRED 3 second wait ---------------------------------------
    millisleep (THREE_SECONDS);
 
    // REQUIRED output #2 -------------------------------------------
    // NOTE: after the following output, C1 can not make any output
-   printf("    Child Process #1 is terminating (checksum: %d) ....\n\n", checksum);
+   printf("    Child Process #%d is terminating (checksum: %d) ....\n\n", process_number, checksum);
 
    // raise my "Done_Flag" -----------------------------------------
-   p_shm->done_flag[0] = checksum;  // I m done!
+   p_shm->done_flag[process_number] = checksum;  // I m done!
+}
+
+void producer_process(struct shared_mem * p_shm, int msqid, int process_number)
+{
+   int          i;            // the loop counter
+   int          status;       // result status code           
+   unsigned int my_rand;      // a randon number
+   unsigned int checksum;     // the local checksum
+
+   struct message buf;
+
+   char* consumer_string = "first";
+
+   if (process_number == 1) {
+      consumer_string = "second";
+   }
+
+   printf("    Child Process #%d is created ....\n", process_number);
+   printf("    I am the %s producer ....\n\n", consumer_string);
+
+   while (p_shm->go_flag == 0){
+      millisleep(1000);
+   }
+
+   for (i = 0; i < NUM_REPEATS; i++)
+   {
+      my_rand = uniform_rand();
+      buf.mtype = 1;
+      buf.mtext[0] = my_rand;
+
+      status = msgsnd(msqid, (struct message*)&buf, sizeof(buf.mtext), 0);
+      // printf("Producing random number: %d\n", my_rand);
+
+      if (status == -1) {
+         perror("Error occured when recieving message in consumer process");
+      }
+
+      p_shm->individual_sum[process_number] += my_rand;
+   }
+
+
+   checksum = p_shm->individual_sum[process_number];
+
+   // REQUIRED 3 second wait ---------------------------------------
+   millisleep (THREE_SECONDS);
+
+   // REQUIRED output #2 -------------------------------------------
+   // NOTE: after the following output, C1 can not make any output
+   printf("    Child Process #%d is terminating (checksum: %d) ....\n\n", process_number, checksum);
+
+   // raise my "Done_Flag" -----------------------------------------
+   p_shm->done_flag[process_number] = checksum;  // I m done!
+}
+
+bool processes_done(struct shared_mem* p_shm) {
+   for (int i = 0; i < NUM_CHILD; i++){
+      if (p_shm->done_flag[i] == 0){
+         return false;
+      }
+   }
+
+   return true;
 }
 
 int main(void) {
    int message_queue_id;
    int shared_mem_id;
+   uint child_processes = 1;
 
    struct shared_mem shmem;
+   struct shared_mem* shared_mem_pointer;
    
    size_t shm_size = sizeof shmem;
 
@@ -124,9 +212,59 @@ int main(void) {
    printf("Created Message Queue with id, %d\n", message_queue_id);
    printf("Created shared memory with id, %d\n", shared_mem_id);
 
-   // Delete the message queue
-   msgctl(message_queue_id, IPC_RMID, NULL);
+   shared_mem_pointer = shmat(shared_mem_id, NULL, 0);
+   shared_mem_pointer->type_flag = 0;
 
-   // Delete shared memory
-   shmctl(shared_mem_id, IPC_RMID, NULL);
+   // determines which type of process the child process is
+   // 0 - 1 is producer, 2 - 3 is consumer
+   int process_type_flag = 0;
+
+   int process_id;
+   for (int i = 0; i < NUM_CHILD; i++){
+      process_id = fork();
+
+      process_type_flag = shared_mem_pointer->type_flag;
+
+      if (process_id != 0){
+         break;
+      }
+
+      shared_mem_pointer->type_flag += 1;
+   }
+
+   printf("Fork ID: %d. Type: %d\n", process_id, process_type_flag);
+
+   if (process_id != 0) {
+      if (process_type_flag == 0 || process_type_flag == 1){
+         producer_process(shared_mem_pointer, message_queue_id, process_type_flag);
+      } else {
+         consumer_process(shared_mem_pointer, message_queue_id, process_type_flag);
+      }
+   } else if (process_id == 0){
+      shared_mem_pointer->go_flag = 1;
+
+      while(!processes_done(shared_mem_pointer)){
+      }
+
+      int send_checksum = shared_mem_pointer->individual_sum[0] + shared_mem_pointer->individual_sum[1];
+      int receive_checksum = shared_mem_pointer->individual_sum[2] + shared_mem_pointer->individual_sum[3];
+
+      printf("SEND CHECKSUM: %d\n", send_checksum);
+      printf("RCV CHECKSUM: %d\n", receive_checksum);
+
+      if (send_checksum == receive_checksum){
+         printf("PROGRAM SUCCESS. CHECKSUMS VALID\n");
+      } else {
+         printf("PROGRAM FAILED: CHECKSUMS INVALID\n");
+      }   
+
+
+      // Delete the message queue
+      msgctl(message_queue_id, IPC_RMID, NULL);
+      printf("Deleted Message Queue, ID: %d\n", message_queue_id);
+
+      // Delete shared memory
+      shmctl(shared_mem_id, IPC_RMID, NULL);
+      printf("Deleted Shared Memory, ID: %d\n", shared_mem_id);
+   }
 }
