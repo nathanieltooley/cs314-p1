@@ -49,8 +49,8 @@ struct shared_mem {
 };
 
 /* function "millisleep" ------------------------------------------ */
-void millisleep(unsigned micro_seconds)
-{ usleep(micro_seconds); }
+void millisleep(unsigned ms)
+{ usleep(ms * 1000); }
 
 // uniform_rand ///////////////////////////////////////////////////////////////
 unsigned int uniform_rand(void)
@@ -88,6 +88,7 @@ void consumer_process(struct shared_mem * p_shm, int msqid, int process_number)
    srand(time(0)); 
 
    while (p_shm->go_flag == 0){
+      // printf("Waiting to start Consumer\n");
       millisleep(1000);
    }
 
@@ -141,6 +142,7 @@ void producer_process(struct shared_mem * p_shm, int msqid, int process_number)
    printf("    I am the %s producer ....\n\n", consumer_string);
 
    while (p_shm->go_flag == 0){
+      // printf("Waiting to start Producer\n");
       millisleep(1000);
    }
 
@@ -244,6 +246,7 @@ int main(void) {
       shared_mem_pointer->go_flag = 1;
 
       while(!processes_done(shared_mem_pointer)){
+         // printf("Waiting for children to finish \n");
       }
 
       int send_checksum = shared_mem_pointer->individual_sum[0] + shared_mem_pointer->individual_sum[1];
