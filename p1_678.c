@@ -30,15 +30,15 @@
 
 #define BUFFER_SIZE       1024    // max. message queue size
 
-#define ONE_SECOND     1000000    //    1 second
-#define THREE_SECONDS  3000000    //    3 seconds
+#define ONE_SECOND        1000    //    1 second
+#define THREE_SECONDS     3000    //    3 seconds
 
 #define PERM_FLAG         0644    // May also need to be 0666
 
 // definition of message -------------------------------------------
 struct message{
    long mtype;
-   int mtext[BUFFER_SIZE];
+   unsigned int mnum;
 };
 
 struct shared_mem {
@@ -96,14 +96,14 @@ void consumer_process(struct shared_mem * p_shm, int msqid, int process_number)
    {
       // printf("Recieving");
       // don't wait for a message to appear
-      status = msgrcv(msqid, (struct message*)&buf, sizeof(buf.mtext), 0, 0); 
+      status = msgrcv(msqid, (struct message*)&buf, sizeof(buf.mnum), 0, 0); 
 
       if (status == -1) {
          perror("Error occured when recieving message in consumer process");
          continue;
       }
 
-      my_rand = buf.mtext[0];
+      my_rand = buf.mnum;
 
       p_shm->individual_sum[process_number] += my_rand;
 
@@ -150,9 +150,9 @@ void producer_process(struct shared_mem * p_shm, int msqid, int process_number)
    {
       my_rand = uniform_rand();
       buf.mtype = 1;
-      buf.mtext[0] = my_rand;
+      buf.mnum = my_rand;
 
-      status = msgsnd(msqid, (struct message*)&buf, sizeof(buf.mtext), 0);
+      status = msgsnd(msqid, (struct message*)&buf, sizeof(buf.mnum), 0);
       // printf("Producing random number: %d\n", my_rand);
 
       if (status == -1) {
